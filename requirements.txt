@@ -1,0 +1,12 @@
+# 帧防 FrameGuard · 运行依赖
+# 要求 Python >= 3.9（推荐 3.10 ~ 3.12）
+#
+# 安装：
+#   python -m venv .venv
+#   .venv/bin/pip install -r requirements.txt        # Windows: .venv\Scripts\pip install -r requirements.txt
+
+gradio>=5.0,<7.0
+openai>=1.40
+httpx>=0.26
+opencv-python-headless>=4.9
+pillow>=10.0

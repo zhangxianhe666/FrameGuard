@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "frameguard"
+version = "1.0.0"
+description = "帧防 FrameGuard · 视觉安全智能分析：用多模态大模型逐帧理解监控画面，对照自定义规则判定违规并输出分时段报告"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+keywords = ["vision", "safety", "vlm", "surveillance", "compliance", "gradio", "internvl"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering :: Image Recognition",
+]
+dependencies = [
+    "gradio>=5.0,<7.0",
+    "openai>=1.40",
+    "httpx>=0.26",
+    "opencv-python-headless>=4.9",
+    "pillow>=10.0",
+]
+
+[project.optional-dependencies]
+# 仅开发/自动化验证需要（驱动真实浏览器截图）
+dev = ["playwright>=1.40"]
+
+[project.urls]
+Homepage = "https://github.com/zhangxianhe666/FrameGuard"
+Repository = "https://github.com/zhangxianhe666/FrameGuard"
+
+[tool.setuptools]
+packages = ["core"]
+py-modules = ["app", "serve", "selftest"]
