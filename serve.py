@@ -28,6 +28,7 @@ CACHE_DIR = os.path.join(APP_DIR, "cache")
 PID_FILE = os.path.join(CACHE_DIR, "server.pid")
 LOG_FILE = os.path.join(CACHE_DIR, "server.log")
 APP_ENTRY = os.path.join(APP_DIR, "app.py")
+ENV_FILE = os.path.join(APP_DIR, ".env")
 
 IS_WINDOWS = os.name == "nt"
 DEFAULT_HOST = "127.0.0.1"
@@ -41,6 +42,35 @@ PROXY_VARS = (
     "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
     "http_proxy", "https_proxy", "all_proxy",
 )
+
+
+def load_env_file(path: str = ENV_FILE) -> None:
+    """读取项目根目录的 .env（不覆盖已存在的环境变量）。
+
+    本脚本要在「依赖尚未安装」时也能运行，因此不引入 python-dotenv，
+    这里自带一个极简实现，与 core/config.py 中的解析规则保持一致。
+    这样 .env 里配置的 FRAMEGUARD_HOST / FRAMEGUARD_PORT 才能真正生效。
+    """
+    if not os.path.isfile(path):
+        return
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            for raw in fh:
+                line = raw.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                if line.startswith("export "):
+                    line = line[7:].strip()
+                key, _, value = line.partition("=")
+                key = key.strip()
+                value = value.strip().strip("'\"")
+                if key and key not in os.environ:
+                    os.environ[key] = value
+    except OSError:
+        pass
+
+
+load_env_file()
 
 
 # --------------------------------------------------------------------------
