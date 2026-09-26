@@ -1,0 +1,32 @@
+# ---------- 敏感信息 ----------
+.env
+.env.local
+*.key
+
+# ---------- 运行产物（含用户监控画面与报告，绝不入库）----------
+cache/
+outputs/
+!cache/.gitkeep
+!outputs/.gitkeep
+
+# ---------- Python ----------
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+env/
+.python-version
+
+# ---------- 工具 ----------
+.workbuddy/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---------- 日志 ----------
+*.log
