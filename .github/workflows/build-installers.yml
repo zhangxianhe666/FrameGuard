@@ -68,7 +68,9 @@ jobs:
             label: macOS arm64
             platform: macos
             artifact: frameguard-macos-arm64
-          - os: macos-13
+          # Intel Mac 为兜底产物：macos-13 已进入下线长队，改用 macos-15-intel；
+          # 该 label 不存在时会立刻失败，靠 continue-on-error 保证不阻塞其余平台与发布。
+          - os: macos-15-intel
             label: macOS x86_64 (experimental)
             platform: macos
             artifact: frameguard-macos-x86_64

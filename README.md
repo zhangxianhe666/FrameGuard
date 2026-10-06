@@ -376,7 +376,7 @@ PyInstaller 不支持跨平台交叉编译，因此必须在各平台的原生 r
 | 任务 | Runner | 产物 |
 | --- | --- | --- |
 | macOS arm64 | `macos-14` | `FrameGuard-<版本>-macos-arm64.dmg` |
-| macOS x86_64 | `macos-13` | `FrameGuard-<版本>-macos-x86_64.dmg`（兜底产物，失败不阻塞发布） |
+| macOS x86_64 | `macos-15-intel` | `FrameGuard-<版本>-macos-x86_64.dmg`（兜底产物，失败不阻塞发布） |
 | Linux x86_64 | `ubuntu-22.04` | `FrameGuard-<版本>-linux-x86_64.AppImage` + 同名 `.tar.gz` |
 | Windows x64 | `windows-latest` | `FrameGuard-<版本>-windows-x64-setup.exe`（Inno Setup） |
 
