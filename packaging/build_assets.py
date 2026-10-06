@@ -13,8 +13,17 @@
 from __future__ import annotations
 
 import os
+import sys
 
 from PIL import Image, ImageDraw
+
+# Windows 上 Python 默认用本地代码页（cp1252/gbk）写 stdout，
+# 直接 print 中文或 ✅ 会抛 UnicodeEncodeError，这里统一改成 UTF-8。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")     # type: ignore[union-attr]
+    except Exception:                                               # noqa: BLE001
+        pass
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ASSETS = os.path.join(HERE, "assets")

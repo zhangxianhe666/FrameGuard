@@ -25,6 +25,14 @@ import time
 import urllib.error
 import urllib.request
 
+# Windows 上 Python 默认用本地代码页（cp1252/gbk）写 stdout，
+# 直接 print 中文或 ✅ 会抛 UnicodeEncodeError，这里统一改成 UTF-8。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")     # type: ignore[union-attr]
+    except Exception:                                               # noqa: BLE001
+        pass
+
 DIST = sys.argv[1] if len(sys.argv) > 1 else "dist"
 IS_WIN = os.name == "nt"
 
