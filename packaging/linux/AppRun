@@ -1,0 +1,31 @@
+#!/bin/sh
+# 帧防 FrameGuard · AppImage 入口
+#
+# 支持：
+#   ./FrameGuard-x.y.z-linux-x86_64.AppImage            启动（自动打开浏览器）
+#   ./FrameGuard-x.y.z-linux-x86_64.AppImage stop       停止后台服务
+#   ./FrameGuard-x.y.z-linux-x86_64.AppImage status     查看运行状态
+
+HERE="$(dirname "$(readlink -f "$0")")"
+BIN="$HERE/usr/bin/FrameGuard/FrameGuard"
+
+case "${1:-}" in
+  stop)
+    if pkill -f "$BIN" 2>/dev/null; then
+      echo "已停止帧防 FrameGuard。"
+    else
+      echo "没有正在运行的帧防 FrameGuard。"
+    fi
+    exit 0
+    ;;
+  status)
+    if pgrep -f "$BIN" >/dev/null 2>&1; then
+      echo "帧防 FrameGuard：运行中"
+      exit 0
+    fi
+    echo "帧防 FrameGuard：未运行"
+    exit 1
+    ;;
+esac
+
+exec "$BIN" "$@"

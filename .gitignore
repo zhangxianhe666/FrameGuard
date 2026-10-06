@@ -20,6 +20,13 @@ venv/
 env/
 .python-version
 
+# ---------- 打包产物 ----------
+installer/
+_smoke/
+*.dmg
+*.AppImage
+*.AppDir/
+
 # ---------- 工具 ----------
 .workbuddy/
 .idea/

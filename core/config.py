@@ -9,14 +9,56 @@
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 # --------------------------------------------------------------------------
-# 项目路径
+# 运行形态与目录布局
+#
+# 有两种运行方式，两者的「资源在哪里」和「数据写到哪里」并不相同：
+#
+#   1) 源码运行（python app.py / serve.py）
+#      资源、输出、缓存、.env 都在项目目录内 —— 与历史行为完全一致。
+#
+#   2) 安装包运行（PyInstaller 冻结）
+#      资源（prompts/rules 等）随安装包分发，位于本次运行的临时解压目录
+#      （sys._MEIPASS），只读语义、随时可能被系统清理；
+#      因此报告输出、抽帧缓存、崩溃日志必须落到**用户数据目录**，
+#      否则用户重启程序后报告就"消失"了。
 # --------------------------------------------------------------------------
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+APP_NAME = "FrameGuard"
+APP_VERSION = "1.0.0"
+APP_LABEL = "帧防 FrameGuard"
+
+FROZEN = bool(getattr(sys, "frozen", False))
+
+
+def _user_data_dir() -> str:
+    """各平台约定的用户数据目录（安装后读写报告与缓存的地方）。"""
+    if sys.platform == "darwin":
+        base = os.path.expanduser("~/Library/Application Support")
+    elif os.name == "nt":
+        base = os.environ.get("APPDATA") or os.path.expanduser("~")
+    else:
+        base = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+    return os.path.join(base, APP_NAME)
+
+
+if FROZEN:
+    # sys._MEIPASS 是 PyInstaller 本次运行的资源目录；拿不到时退回到可执行文件所在目录
+    RESOURCE_DIR = os.path.abspath(
+        getattr(sys, "_MEIPASS", None) or os.path.dirname(sys.executable)
+    )
+    EXE_DIR = os.path.dirname(os.path.abspath(sys.executable))
+    BASE_DIR = RESOURCE_DIR
+    DATA_DIR = _user_data_dir()
+else:
+    BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    RESOURCE_DIR = BASE_DIR
+    EXE_DIR = BASE_DIR
+    DATA_DIR = BASE_DIR
 
 
 def _load_dotenv(path: str) -> None:
@@ -45,6 +87,17 @@ def _load_dotenv(path: str) -> None:
 
 _load_dotenv(os.path.join(BASE_DIR, ".env"))
 
+if FROZEN:
+    # 打包运行时的 .env 查找顺序（先命中的优先，因为不会覆盖已存在的变量）：
+    #   1. 用户数据目录 —— 升级、移动安装目录都不会丢配置
+    #   2. 可执行文件同级目录 —— 便于"绿色版"把 .env 放在程序旁边
+    for _candidate in (
+        os.path.join(DATA_DIR, ".env"),
+        os.path.join(EXE_DIR, ".env"),
+        os.path.join(RESOURCE_DIR, ".env"),
+    ):
+        _load_dotenv(_candidate)
+
 
 def _env_path(name: str, default: str) -> str:
     """允许用环境变量把输出/缓存目录重定向到项目外（便于容器化部署）。"""
@@ -54,10 +107,10 @@ def _env_path(name: str, default: str) -> str:
     return os.path.abspath(os.path.expanduser(value))
 
 
-PROMPT_DIR = os.path.join(BASE_DIR, "prompts")
-RULES_DIR = os.path.join(BASE_DIR, "rules")
-OUTPUT_DIR = _env_path("FRAMEGUARD_OUTPUT_DIR", os.path.join(BASE_DIR, "outputs"))
-CACHE_DIR = _env_path("FRAMEGUARD_CACHE_DIR", os.path.join(BASE_DIR, "cache"))
+PROMPT_DIR = os.path.join(RESOURCE_DIR, "prompts")
+RULES_DIR = os.path.join(RESOURCE_DIR, "rules")
+OUTPUT_DIR = _env_path("FRAMEGUARD_OUTPUT_DIR", os.path.join(DATA_DIR, "outputs"))
+CACHE_DIR = _env_path("FRAMEGUARD_CACHE_DIR", os.path.join(DATA_DIR, "cache"))
 
 for _d in (OUTPUT_DIR, CACHE_DIR):
     try:

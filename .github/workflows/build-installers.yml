@@ -1,0 +1,225 @@
+name: Build Installers
+
+# 三平台安装包构建：PyInstaller 无法跨平台交叉编译，
+# 因此必须在 macOS / Linux / Windows 各自的 runner 上原生打包。
+#
+# 触发方式：
+#   1. 手动：Actions → Build Installers → Run workflow（可指定版本号）
+#   2. 打标签：git tag v1.0.0 && git push origin v1.0.0
+#
+# 产物：各平台安装包上传为 Artifact，并自动汇总到同名 GitHub Release。
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "版本号（留空 = 读取 pyproject.toml）"
+        required: false
+        default: ""
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  PYTHON_VERSION: "3.13"
+
+jobs:
+  # ------------------------------------------------------------------ 版本号
+  meta:
+    name: 解析版本号
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: resolve
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ github.event.inputs.version || '' }}"
+          VERSION="${VERSION#v}"
+          if [ -z "$VERSION" ] && [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          if [ -z "$VERSION" ]; then
+            VERSION="$(grep -m1 '^version' pyproject.toml | sed -E 's/.*"([^"]+)".*/\1/')"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "📦 版本号：$VERSION"
+
+  # -------------------------------------------------------------- 构建矩阵
+  build:
+    name: ${{ matrix.label }}
+    needs: meta
+    runs-on: ${{ matrix.os }}
+    # Intel Mac runner 属于兜底产物：即使失败也不影响其余平台与 Release
+    continue-on-error: ${{ matrix.experimental || false }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            label: macOS arm64
+            platform: macos
+            artifact: frameguard-macos-arm64
+          - os: macos-13
+            label: macOS x86_64 (experimental)
+            platform: macos
+            artifact: frameguard-macos-x86_64
+            experimental: true
+          - os: ubuntu-22.04
+            label: Linux x86_64
+            platform: linux
+            artifact: frameguard-linux-x86_64
+          - os: windows-latest
+            label: Windows x64
+            platform: windows
+            artifact: frameguard-windows-x64
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install "pyinstaller>=6.6"
+
+      - name: 记录依赖版本（便于复现问题）
+        run: pip list --format=freeze
+
+      - name: 生成图标资源
+        run: python packaging/build_assets.py
+
+      - name: 生成 macOS 图标（.icns）
+        if: matrix.platform == 'macos'
+        run: bash packaging/macos/make_icns.sh packaging/assets/frameguard.png packaging/assets/frameguard.icns
+
+      - name: PyInstaller 打包
+        env:
+          FRAMEGUARD_VERSION: ${{ needs.meta.outputs.version }}
+        run: pyinstaller --noconfirm packaging/frameguard.spec
+
+      - name: 冒烟测试（确认资源已正确打进包）
+        run: python packaging/smoke_test.py dist
+
+      # ------------------------------------------------------------ macOS
+      - name: 生成 .dmg
+        if: matrix.platform == 'macos'
+        env:
+          FRAMEGUARD_VERSION: ${{ needs.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [ "$(uname -m)" = "arm64" ]; then ARCH=arm64; else ARCH=x86_64; fi
+          bash packaging/macos/build_dmg.sh "$FRAMEGUARD_VERSION" dist/FrameGuard.app installer "$ARCH"
+
+      # ------------------------------------------------------------ Linux
+      - name: 安装 AppImage 工具链
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libfuse2 file
+
+      - name: 生成 .AppImage 与 .tar.gz
+        if: matrix.platform == 'linux'
+        env:
+          FRAMEGUARD_VERSION: ${{ needs.meta.outputs.version }}
+        run: bash packaging/linux/build_appimage.sh "$FRAMEGUARD_VERSION" dist installer
+
+      # ---------------------------------------------------------- Windows
+      - name: 补齐安装目录（停止脚本）
+        if: matrix.platform == 'windows'
+        run: cp packaging/windows/stop-frameguard.bat dist/FrameGuard/
+
+      - name: 安装 Inno Setup
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y
+          "C:\Program Files (x86)\Inno Setup 6" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: 生成 Windows 安装程序
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        env:
+          FRAMEGUARD_VERSION: ${{ needs.meta.outputs.version }}
+        run: |
+          & iscc "/DAppVersion=$env:FRAMEGUARD_VERSION" "/DSourceDir=dist\FrameGuard" "/DOutputDir=installer" "packaging\windows\frameguard.iss"
+
+      - name: 列出产物
+        run: ls -la installer
+
+      - name: 上传安装包
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: installer/*
+          if-no-files-found: error
+          retention-days: 14
+
+  # ---------------------------------------------------------------- Release
+  release:
+    name: 发布 Release
+    needs: [meta, build]
+    if: always() && needs.meta.result == 'success' && needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: 检查产物
+        shell: bash
+        run: |
+          set -euo pipefail
+          find artifacts -type f | sort
+          COUNT="$(find artifacts -type f | wc -l | tr -d ' ')"
+          echo "共 $COUNT 个产物"
+          if [ "$COUNT" -eq 0 ]; then
+            echo "❌ 没有任何安装包，跳过 Release"
+            exit 1
+          fi
+
+      - name: 创建 / 更新 Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.meta.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="v${VERSION}"
+
+          # 发布说明用仓库内的模板，避免把 YAML 缩进带进 markdown
+          sed -e "s/{{VERSION}}/${VERSION}/g" \
+              -e "s#{{REPO}}#${GITHUB_REPOSITORY}#g" \
+              packaging/release_notes.md > /tmp/notes.md
+
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG 已存在，改为上传 / 覆盖产物"
+          else
+            gh release create "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "帧防 FrameGuard ${VERSION}" \
+              --notes-file /tmp/notes.md \
+              --target "${GITHUB_SHA}"
+          fi
+
+          find artifacts -type f -print0 \
+            | xargs -0 gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber
+
+          echo "✅ https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}"

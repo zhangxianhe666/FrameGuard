@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=FrameGuard
+Name[zh_CN]=帧防 FrameGuard
+Comment=Visual safety compliance analysis powered by a multimodal LLM
+Comment[zh_CN]=用多模态大模型逐帧理解监控画面，对照自定义规则判定违规并输出分时段报告
+Exec=FrameGuard
+Icon=frameguard
+Terminal=false
+Categories=Utility;Security;Monitor;
+Keywords=safety;surveillance;compliance;vision;
+StartupWMClass=FrameGuard

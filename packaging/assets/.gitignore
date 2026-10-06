@@ -1,0 +1,5 @@
+# 图标资源由 packaging/build_assets.py 现场生成（PNG / ICO），
+# macOS 的 .icns 由 packaging/macos/make_icns.sh 生成，均不入库。
+*.png
+*.ico
+*.icns

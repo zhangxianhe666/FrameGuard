@@ -8,8 +8,12 @@ from __future__ import annotations
 
 import html
 import os
+import signal
+import socket
+import subprocess
 import sys
 import traceback
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 import gradio as gr
@@ -27,7 +31,9 @@ from core.config import (                                              # noqa: E
     DEFAULT_TEMPERATURE,
     DEFAULT_TIMEOUT,
     DEFAULT_WORKERS,
+    FROZEN,
     OUTPUT_DIR,
+    RULES_DIR,
     AnalysisReport,
     ModelConfig,
 )
@@ -49,7 +55,7 @@ from core.rules import parse_rules                                     # noqa: E
 from core.sources import detect_source_kind, is_image_file, is_video_file, probe_source  # noqa: E402
 from core import ui_theme                                              # noqa: E402
 
-RULES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rules", "default_rules.md")
+RULES_FILE = os.path.join(RULES_DIR, "default_rules.md")
 PERIOD_LABELS = [label for label, _ in PERIOD_CHOICES]
 PERIOD_VALUE_BY_LABEL = {label: value for label, value in PERIOD_CHOICES}
 PERIOD_LABEL_BY_VALUE = {value: label for label, value in PERIOD_CHOICES}
@@ -591,27 +597,156 @@ def build_ui() -> gr.Blocks:
     return demo
 
 
-if __name__ == "__main__":
+def _pick_port(host: str, wanted: int) -> int:
+    """端口被占用时向后顺延，避免双击启动直接失败（安装包场景尤其重要）。"""
+    probe_host = "127.0.0.1" if host in ("0.0.0.0", "::") else host
+    for candidate in range(wanted, wanted + 20):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            try:
+                sock.bind((probe_host, candidate))
+                return candidate
+            except OSError:
+                continue
+    return wanted
+
+
+PID_FILE = os.path.join(CACHE_DIR, "app.pid")
+
+
+def _process_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        try:
+            out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"],
+                                 capture_output=True, text=True, timeout=10).stdout
+            return str(pid) in out
+        except Exception:                                   # noqa: BLE001
+            return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def frozen_control_command() -> bool:
+    """打包运行下支持 `FrameGuard stop` / `FrameGuard status` 关闭或查看后台服务。
+
+    返回 True 表示本次进程只做了一次控制操作、无需启动界面。
+    """
+    if not FROZEN or len(sys.argv) < 2:
+        return False
+    command = sys.argv[1].strip().lower()
+    if command not in ("stop", "status"):
+        return False
+
+    pid = None
+    try:
+        with open(PID_FILE, "r", encoding="utf-8") as fh:
+            pid = int((fh.read() or "").strip())
+    except (OSError, ValueError):
+        pid = None
+    alive = bool(pid and _process_alive(pid))
+
+    if command == "status":
+        print(f"帧防 FrameGuard：{'运行中 PID=' + str(pid) if alive else '未运行'}")
+        return True
+
+    if alive and pid:
+        try:
+            if os.name == "nt":
+                subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
+                               capture_output=True, timeout=15)
+            else:
+                os.kill(pid, signal.SIGTERM)
+            print(f"已停止帧防 FrameGuard（PID={pid}）")
+        except OSError:
+            print(f"⚠️  无法结束 PID={pid}，请手动处理")
+    else:
+        print("没有正在运行的帧防 FrameGuard。")
+    try:
+        os.remove(PID_FILE)
+    except OSError:
+        pass
+    return True
+
+
+def _install_crash_logger() -> None:
+    """打包运行没有控制台，把未捕获异常落盘，Windows 上额外弹窗，避免"闪退无提示"。"""
+
+    def _hook(exc_type, exc, tb) -> None:
+        if issubclass(exc_type, KeyboardInterrupt):
+            sys.__excepthook__(exc_type, exc, tb)
+            return
+        detail = "".join(traceback.format_exception(exc_type, exc, tb))
+        log_path = os.path.join(CACHE_DIR, "crash.log")
+        try:
+            os.makedirs(CACHE_DIR, exist_ok=True)
+            with open(log_path, "a", encoding="utf-8") as fh:
+                fh.write(f"\n[{datetime.now().isoformat()}] FrameGuard 异常\n{detail}\n")
+        except OSError:
+            log_path = "(未能写入崩溃日志)"
+        if os.name == "nt" and os.environ.get("FRAMEGUARD_HEADLESS", "").strip() != "1":
+            try:
+                import ctypes
+
+                ctypes.windll.user32.MessageBoxW(
+                    None, detail[-1500:], f"帧防 FrameGuard 异常\n日志：{log_path}", 0x10
+                )
+            except Exception:                               # noqa: BLE001
+                pass
+        sys.__stderr__.write(detail)
+
+    sys.excepthook = _hook
+
+
+def main() -> None:
+    if FROZEN:
+        _install_crash_logger()
+        if frozen_control_command():
+            return
+
+    try:
+        os.makedirs(CACHE_DIR, exist_ok=True)
+        with open(PID_FILE, "w", encoding="utf-8") as fh:
+            fh.write(str(os.getpid()))
+    except OSError:
+        pass
+
     ui = build_ui()
     ui.queue()
 
     host = os.environ.get("FRAMEGUARD_HOST") or os.environ.get("VISUAL_SAFETY_HOST", "127.0.0.1")
     port = int(os.environ.get("FRAMEGUARD_PORT") or os.environ.get("VISUAL_SAFETY_PORT", "7891"))
+    port = _pick_port(host, port)
 
     if not DEFAULT_API_KEY.strip():
         print("=" * 68)
         print("提示：未检测到 API Key。")
         print("   方式一：在界面「⑥ 模型配置 → API Key」中直接填写；")
         print("   方式二：复制 .env.example 为 .env 并填入 FRAMEGUARD_API_KEY。")
+        print(f"   数据目录（.env / 报告 / 缓存）：{os.path.dirname(CACHE_DIR)}")
         print("=" * 68)
 
     print(f"帧防 FrameGuard 启动中 → http://{'127.0.0.1' if host in ('0.0.0.0', '::') else host}:{port}")
+    print(f"报告输出目录：{OUTPUT_DIR}")
+
+    # 安装包运行时自动拉起系统默认浏览器；源码运行保持原行为。
+    # 显式设置 FRAMEGUARD_OPEN_BROWSER=0/1 可强制覆盖（自动化测试用 0）。
+    _open_env = os.environ.get("FRAMEGUARD_OPEN_BROWSER", "").strip()
+    if _open_env == "1":
+        open_browser = True
+    elif _open_env == "0":
+        open_browser = False
+    else:
+        open_browser = FROZEN
 
     ui.launch(
         server_name=host,
         server_port=port,
         allowed_paths=[OUTPUT_DIR, CACHE_DIR],
-        inbrowser=False,
+        inbrowser=open_browser,
         show_error=True,
         # Gradio 6：外观相关参数统一在 launch 阶段传入
         css=ui_theme.CSS,
@@ -619,3 +754,7 @@ if __name__ == "__main__":
         favicon_path=ui_theme.ensure_favicon(),
         footer_links=[],
     )
+
+
+if __name__ == "__main__":
+    main()

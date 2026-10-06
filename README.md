@@ -22,6 +22,42 @@
 
 ---
 
+## 下载安装包（普通用户看这里）
+
+不想折腾 Python 环境？直接下载对应平台的安装包，**包内已自带 Python 与全部依赖，双击即用**：
+
+| 平台 | 安装包 | 安装方式 |
+| --- | --- | --- |
+| macOS（Apple 芯片 M 系列） | `FrameGuard-1.0.0-macos-arm64.dmg` | 打开 dmg → 把 FrameGuard 拖进「应用程序」 |
+| macOS（Intel 芯片） | `FrameGuard-1.0.0-macos-x86_64.dmg` | 同上 |
+| Windows 10 / 11（64 位） | `FrameGuard-1.0.0-windows-x64-setup.exe` | 双击安装，支持免管理员安装 |
+| Linux（x86_64） | `FrameGuard-1.0.0-linux-x86_64.AppImage` | `chmod +x` 后直接运行；无 FUSE 环境改用同名 `.tar.gz` |
+
+下载地址：[Releases 页面](https://github.com/zhangxianhe666/FrameGuard/releases/latest)。
+
+**首次启动的放行说明**（安装包未做商业代码签名）：
+
+- **macOS**：在「应用程序」里**右键 → 打开 → 再点一次「打开」**，只需放行这一次。
+  若仍被拦下：`xattr -dr com.apple.quarantine /Applications/FrameGuard.app`
+- **Windows**：可能出现 SmartScreen 蓝色提示，点「更多信息 → 仍要运行」。
+
+启动后会自动打开浏览器（默认 <http://127.0.0.1:7891>，端口被占用会自动顺延），
+在界面「**⑥ 模型配置 → API Key**」填入 Key 即可开始分析，无需手工建 `.env`。
+
+安装包形态下，报告与缓存写在**用户数据目录**（而不是程序目录，卸载程序不会误删你的报告）：
+
+| 平台 | 位置 |
+| --- | --- |
+| macOS | `~/Library/Application Support/FrameGuard/` |
+| Windows | `%APPDATA%\FrameGuard\` |
+| Linux | `~/.local/share/FrameGuard/` |
+
+关闭服务：macOS 按 ⌘Q；Linux 执行 `./FrameGuard-*.AppImage stop`；Windows 用开始菜单里的「Stop FrameGuard」。
+
+> 需要从源码运行或二次开发？看下面的「快速开始」；想自己重新构建安装包？见文末「附：自行构建安装包」。
+
+---
+
 ## 一、快速开始
 
 ### 1. 安装（三平台通用）
@@ -197,7 +233,7 @@ FrameGuard/
 ├── .env.example              # 配置模板（复制为 .env 后填写）
 ├── LICENSE                   # MIT
 ├── core/
-│   ├── config.py             # 配置与数据模型（.env / 环境变量加载）
+│   ├── config.py             # 配置与数据模型（.env / 环境变量加载、资源与数据目录分流）
 │   ├── ui_theme.py           # 界面视觉层：主题 / CSS / Hero / 图标 / 引导态
 │   ├── prompt.py             # 提示词模板引擎 + 变量注册表
 │   ├── rules.py              # 规则解析（字段名 / 合法取值 / 违规取值 / 语义推断）
@@ -208,6 +244,8 @@ FrameGuard/
 │   └── demo.py               # 合成演示图像生成
 ├── prompts/workplace_safety.md   # 默认提示词模板
 ├── rules/default_rules.md        # 默认识别规则
+├── packaging/                    # 安装包构建（PyInstaller / dmg / AppImage / Inno Setup）
+├── .github/workflows/            # 三平台安装包自动构建流程
 ├── docs/ui_preview/              # 界面预览截图
 ├── outputs/<时间戳>/              # 每次任务的报告输出（已 gitignore）
 └── cache/                        # 抽帧 / 演示图片缓存、服务日志与 PID（已 gitignore）
@@ -322,3 +360,52 @@ python -m venv .venv && .venv/bin/pip install -r requirements.txt
    curl 能通但界面不通 → 基本可判定是代理或证书问题；curl 也不通 → 是本机网络/DNS/防火墙问题。
 4. 确认 BaseURL 末尾带 `/v1/`，API Key 未过期（Key 失效报的是 401，不是 Connection error）。
 5. 长视频流分析时若偶发失败，属正常网络抖动：调小并发数、调大「失败重试次数」即可。
+
+---
+
+## 附：自行构建安装包（GitHub Actions）
+
+三平台安装包由 [`.github/workflows/build-installers.yml`](.github/workflows/build-installers.yml) 构建。
+PyInstaller 不支持跨平台交叉编译，因此必须在各平台的原生 runner 上分别打包，这里用 4 个并行任务完成。
+
+**触发方式**（二选一）：
+
+1. 仓库页面 → **Actions → Build Installers → Run workflow**，可填版本号（留空则读 `pyproject.toml`）。
+2. 打标签：`git tag v1.0.0 && git push origin v1.0.0`
+
+| 任务 | Runner | 产物 |
+| --- | --- | --- |
+| macOS arm64 | `macos-14` | `FrameGuard-<版本>-macos-arm64.dmg` |
+| macOS x86_64 | `macos-13` | `FrameGuard-<版本>-macos-x86_64.dmg`（兜底产物，失败不阻塞发布） |
+| Linux x86_64 | `ubuntu-22.04` | `FrameGuard-<版本>-linux-x86_64.AppImage` + 同名 `.tar.gz` |
+| Windows x64 | `windows-latest` | `FrameGuard-<版本>-windows-x64-setup.exe`（Inno Setup） |
+
+每个任务在出包前都会跑 `packaging/smoke_test.py`：**真实启动**冻结后的程序，请求 HTTP 首页与 Gradio
+`/config`，确认前端资源与 `rules` / `prompts` 都打进去了，通过后才继续打包 —— 这能挡住
+"装完打不开、页面一片空白" 这类最常见的打包事故。全部任务成功后自动汇总产物到同名 Release。
+
+**本地复现（以 macOS 为例）**：
+
+```bash
+python -m venv .venv && .venv/bin/pip install -r requirements.txt "pyinstaller>=6.6"
+
+python packaging/build_assets.py                                            # 生成 PNG / ICO 图标
+bash packaging/macos/make_icns.sh packaging/assets/frameguard.png packaging/assets/frameguard.icns
+.venv/bin/pyinstaller --noconfirm packaging/frameguard.spec                 # 产出 dist/FrameGuard.app
+python packaging/smoke_test.py dist                                        # 冒烟测试
+bash packaging/macos/build_dmg.sh 1.0.0 dist/FrameGuard.app installer arm64 # 打 dmg
+```
+
+| 路径 | 作用 |
+| --- | --- |
+| `packaging/frameguard.spec` | PyInstaller 配置，三平台通用；macOS 额外产出 `.app` |
+| `packaging/build_assets.py` | 生成 PNG / ICO 图标（与界面 favicon 同一套盾牌图形） |
+| `packaging/macos/` | `make_icns.sh`（PNG→icns）、`build_dmg.sh`（打 dmg） |
+| `packaging/linux/` | `AppRun`、`frameguard.desktop`、`build_appimage.sh` |
+| `packaging/windows/` | `frameguard.iss`（Inno Setup）、`stop-frameguard.bat` |
+| `packaging/smoke_test.py` | 安装包冒烟测试 |
+
+**打包后目录为什么分两处？** 见 `core/config.py`：`prompts/`、`rules/` 随包分发（只读），
+`outputs/`、`cache/`、`.env` 落到用户数据目录 —— 否则程序一退出，PyInstaller 的临时解压目录被清理，
+用户的报告就跟着没了。
+
