@@ -597,6 +597,24 @@ def build_ui() -> gr.Blocks:
     return demo
 
 
+def _ensure_utf8_console() -> None:
+    """把 stdout / stderr 切成 UTF-8，避免 Windows 上打印中文直接崩溃。
+
+    安装包由 GUI 方式启动（PyInstaller 的 console=False），且 PyInstaller 的
+    bootloader 会忽略 PYTHONIOENCODING / PYTHONUTF8，Windows 下 sys.stdout 仍然
+    是本地代码页（cp1252）。此时哪怕一句 print("提示：……") 也会抛
+    UnicodeEncodeError，表现为「双击没反应 / 一闪而过」。
+    """
+    for name in ("stdout", "stderr"):
+        stream = getattr(sys, name, None)
+        if stream is None:               # GUI 启动没有控制台，print 本就是空操作
+            continue
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
+            pass
+
+
 def _pick_port(host: str, wanted: int) -> int:
     """端口被占用时向后顺延，避免双击启动直接失败（安装包场景尤其重要）。"""
     probe_host = "127.0.0.1" if host in ("0.0.0.0", "::") else host
@@ -696,12 +714,19 @@ def _install_crash_logger() -> None:
                 )
             except Exception:                               # noqa: BLE001
                 pass
-        sys.__stderr__.write(detail)
+        stderr = getattr(sys, "__stderr__", None)
+        if stderr is not None:
+            try:
+                stderr.write(detail)
+            except (UnicodeEncodeError, ValueError, OSError):
+                pass
 
     sys.excepthook = _hook
 
 
 def main() -> None:
+    _ensure_utf8_console()
+
     if FROZEN:
         _install_crash_logger()
         if frozen_control_command():

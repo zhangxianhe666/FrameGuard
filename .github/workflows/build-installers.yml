@@ -161,7 +161,12 @@ jobs:
         env:
           FRAMEGUARD_VERSION: ${{ needs.meta.outputs.version }}
         run: |
-          & iscc "/DAppVersion=$env:FRAMEGUARD_VERSION" "/DSourceDir=dist\FrameGuard" "/DOutputDir=installer" "packaging\windows\frameguard.iss"
+          # SourceDir / OutputDir 用绝对路径显式传入：Inno Setup 里相对路径
+          # 是按「脚本所在目录」解析的，不是当前工作目录。
+          & iscc "/DAppVersion=$env:FRAMEGUARD_VERSION" `
+                 "/DSourceDir=$env:GITHUB_WORKSPACE\dist\FrameGuard" `
+                 "/DOutputDir=$env:GITHUB_WORKSPACE\installer" `
+                 "packaging\windows\frameguard.iss"
 
       - name: 列出产物
         run: ls -la installer
